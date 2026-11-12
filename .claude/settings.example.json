@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Bash({{PMS_LOOKUP_TOOL}} *)",
+      "Bash({{EMAIL_CLI}} draft create *)",
+      "Edit(/runs/**)",
+      "Edit(/.claude/agent-memory/arrival-time-check/**)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Edit(/AUTONOMY.md)",
+      "Edit(/.claude/settings*.json)",
+      "Edit(/.claude/hooks/**)",
+      "Bash(rm *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(git push *)",
+      "WebFetch",
+      "WebSearch"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR}/.claude/hooks/send-guard.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

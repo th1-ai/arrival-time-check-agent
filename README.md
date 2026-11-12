@@ -1,6 +1,6 @@
 # Arrival Time Check Agent
 
-A Claude Code sub-agent + skill for hotel operators. It scans upcoming reservations, finds the guests who have not yet given an estimated arrival time, and drafts warm, personalised emails (in the guest's native language) asking for their ETA. It **never sends** — every email is a draft for you to review.
+A Claude Code sub-agent + skill for hotel operators. It scans upcoming reservations, finds the guests who have not yet given an estimated arrival time, and drafts warm, personalised emails (in the guest's native language) asking for their ETA. By default it **never sends** — every email is a draft for you to review. It can also run on a schedule, and [`AUTONOMY.md`](AUTONOMY.md) sets how much it does when you are not there.
 
 Built on the **WAT framework** (Workflows, Agents, Tools): the AI handles the reasoning and the wording, and your own scripts handle the PMS lookup and the draft creation. This repo is the workflow and the agent. It is markdown only: **the scripts are not included**, you point the agent at the ones your setup has.
 
@@ -14,6 +14,8 @@ Built on the **WAT framework** (Workflows, Agents, Tools): the AI handles the re
 - **Drafts a warm, personalised email per guest** — varies wording by length of stay, party size, and check-in day, and uses only facts from the reservation
 - **Flags edge cases** for manual handling: OTA relay addresses, guests with no email at all, guests who arrive today or tomorrow, guests who were already asked
 - **Optional PMS note** — if you ask, it appends "Arrival time email drafted {date}" to the reservation, which also stops a second request on the next run
+- **Runs on its own, within limits you set** — four autonomy levels in [`AUTONOMY.md`](AUTONOMY.md), from "only when I ask" to "send the request yourself, max 5 a day". The default is report only.
+- **Remembers what it did** — one entry per run in `runs/LOG.md`, so a guest is not asked twice, and the report starts with what needs you
 
 ---
 
@@ -38,7 +40,7 @@ Built on the **WAT framework** (Workflows, Agents, Tools): the AI handles the re
 
 2. **Let Claude set it up with you.** Paste this:
 
-   > Read the README and set this agent up with me. Ask me for each placeholder in the Customising table, one at a time. Then replace the placeholders in `.claude/agents/arrival-time-check.md` and `.claude/skills/arrival-time-check/SKILL.md`, delete the "Template note" block in both files, leave the README as it is, and show me any `{{...}}` that is still open.
+   > Read the README and set this agent up with me. Ask me for each placeholder in the Customising table, one at a time. Then replace the placeholders in `.claude/agents/arrival-time-check.md`, `.claude/skills/arrival-time-check/SKILL.md`, `AUTONOMY.md` and `.claude/settings.example.json`, delete the "Template note" block in the agent and skill files, leave the README and the level in `AUTONOMY.md` as they are, and show me any `{{...}}` that is still open.
 
    Or do it by hand: edit [`.claude/agents/arrival-time-check.md`](.claude/agents/arrival-time-check.md) and [`.claude/skills/arrival-time-check/SKILL.md`](.claude/skills/arrival-time-check/SKILL.md) and replace the placeholders described in [Customising](#customising).
 
@@ -60,7 +62,7 @@ Built on the **WAT framework** (Workflows, Agents, Tools): the AI handles the re
 
 ## Verify it works
 
-1. `grep -rn "{{" .claude/` prints nothing. Every placeholder is filled in.
+1. `grep -rn "{{" .claude/ AUTONOMY.md` prints nothing. Every placeholder is filled in.
 2. `/agents` in Claude Code lists `arrival-time-check`, and typing `/` shows the `arrival-time-check` skill. If you added the files while Claude Code was open and the agent is not listed, restart Claude Code.
 3. Your lookup script runs by itself in a terminal and prints JSON.
 4. Ask: "Run the arrival time check, scan only, no drafts." You get the summary table and no drafts in your mailbox.
@@ -73,7 +75,10 @@ Built on the **WAT framework** (Workflows, Agents, Tools): the AI handles the re
 | The agent stops and lists `{{...}}` names | Placeholders are not all replaced. Run check 1. |
 | "Lookup tool failed" with no table | Your script printed an error and no JSON. Run it by hand to see the error. |
 | A draft is cut off or the command fails on some guests | An apostrophe in the email body broke the shell quoting. Let your wrapper read the body from a file or stdin. |
-| The same guest is asked again on the next run | No PMS note was written. Ask for the note after you send, or tell the agent who to skip. |
+| The same guest is asked again on the next run | `runs/LOG.md` was deleted or the run could not write to it, and no PMS note was written. Keep the log, or ask for the note. |
+| A scheduled run does nothing | `AUTONOMY.md` says `Level: PAUSED` or `Level: 0`, the `Level:` line is missing or has an unknown value, or a placeholder is still open. The reason is in the last entry of `runs/LOG.md`. |
+| A scheduled run reports "permission denied" for your lookup or draft command | The command does not match an `allow` rule in `.claude/settings.local.json`. Make the rule match the command the skill runs. |
+| "send-guard: blocked ..." | The hook stopped a send, reply or forward command. This is correct below Level 3. |
 | The language is wrong for a guest | Tell the agent the right one before you confirm. It saves the correction to its memory. |
 
 ---
@@ -83,10 +88,17 @@ Built on the **WAT framework** (Workflows, Agents, Tools): the AI handles the re
 ```
 arrival-time-check-agent/
 ├── README.md                                         # This file
+├── AUTONOMY.md                                       # Autonomy level, limits and guard rails (you edit it)
 ├── .env.example                                      # Optional record of your setup values
 ├── .gitignore
 ├── LICENSE
+├── runs/
+│   ├── .gitkeep
+│   └── README.md                                     # Format of the run log (LOG.md itself is git-ignored)
 └── .claude/
+    ├── settings.example.json                         # Example permissions + hook for unattended runs
+    ├── hooks/
+    │   └── send-guard.py                             # Blocks send commands unless AUTONOMY.md allows them
     ├── agents/
     │   └── arrival-time-check.md                     # Sub-agent definition (preloads the skill)
     ├── skills/
@@ -102,7 +114,7 @@ arrival-time-check-agent/
 
 ## Customising
 
-The agent and skill files use placeholders so they can be adapted to any PMS + email stack. Replace the following before first run:
+The agent and skill files, `AUTONOMY.md` and `.claude/settings.example.json` use placeholders so they can be adapted to any PMS + email stack. Replace the following before first run:
 
 | Placeholder | What to put | Example |
 |---|---|---|
@@ -115,6 +127,87 @@ The agent and skill files use placeholders so they can be adapted to any PMS + e
 | `{{PMS_NOTES_TOOL}}` | Script that appends a note to a reservation. If you have none, write `not available` and do not ask for PMS notes | `tools/pms_notes.py` |
 
 The script names in the examples are placeholders for your own scripts. The language table, the banned phrases and the house spelling (British English by default) are in the skill file; edit them there.
+
+---
+
+## Run it on its own
+
+The agent can run on a schedule with nobody in the conversation. [`AUTONOMY.md`](AUTONOMY.md) decides what such a run can do. Read it once; it is short.
+
+| Level | A scheduled run |
+|---|---|
+| PAUSED | does nothing and logs why (the kill switch; also applies when the `Level:` line is missing or unknown) |
+| 0 | does nothing (the agent works only when you ask) |
+| 1 (default) | reports who has no arrival time; creates no drafts |
+| 2 | also puts the drafts in your mailbox for you to send |
+| 3 | also sends the first request itself (max 5 a day, direct addresses, approved languages, send hours) and adds the PMS note |
+
+Never on its own, at any level: reminders, replies, guests who arrive today or tomorrow, guests whose notes mention a complaint, payment, medical, legal or safety matter, any other PMS write, anything with money, deleting anything. The full table is in `AUTONOMY.md`.
+
+### 1. Permissions for unattended runs
+
+A scheduled run cannot ask you for permission, so the commands it needs must be allowed in advance. [`.claude/settings.example.json`](.claude/settings.example.json) is an example. It is not loaded under that name, so cloning this repo changes nothing. To use it:
+
+```bash
+cp .claude/settings.example.json .claude/settings.local.json
+```
+
+(`settings.local.json` is git-ignored.) Then make the two `Bash(...)` allow rules match the commands that the skill runs in steps 1 and 5. The example allows: reading files, your lookup command, your draft-create command, and writing to `runs/` and the agent's memory folder. It denies: reading `.env`, editing `AUTONOMY.md`, the settings files and the hook, `rm`, `curl`, `wget`, `git push`, web fetch and web search. Deny rules win over allow rules. Bash rules match the command text as written, so they are a guard rail and not a security boundary; the allowlist is the main control.
+
+For Level 3, add your own send command and `Bash({{PMS_NOTES_TOOL}} *)` to `allow` yourself. They are not in the example on purpose.
+
+### 2. The send guard (hook)
+
+The example settings also register [`.claude/hooks/send-guard.py`](.claude/hooks/send-guard.py) as a `PreToolUse` hook on the Bash tool. It blocks any command that has `send`, `reply` or `forward` as a command word unless `AUTONOMY.md` has the one line `Level: 3` and a `Send command`. It needs `python3`. It applies in normal conversations too, once the settings file is in place. It does not see a send that is hidden inside one of your own scripts, so do not allow a script that sends.
+
+Test it by hand (the first prints nothing and exits 0, the second prints the block reason and exits 2):
+
+```bash
+echo '{"tool_name":"Bash","tool_input":{"command":"your-mail-cli draft create --to a@example.com"}}' | CLAUDE_PROJECT_DIR=. python3 .claude/hooks/send-guard.py; echo $?
+echo '{"tool_name":"Bash","tool_input":{"command":"your-mail-cli draft send --id 1"}}' | CLAUDE_PROJECT_DIR=. python3 .claude/hooks/send-guard.py; echo $?
+```
+
+### 3. The scheduled command
+
+```bash
+cd /path/to/arrival-time-check-agent && \
+claude -p "/arrival-time-check 7 scheduled" \
+  --permission-mode dontAsk \
+  --max-turns 30 \
+  < /dev/null >> runs/cron.log 2>&1
+```
+
+- `-p` runs Claude Code without the interactive screen and prints the report. `/arrival-time-check` runs the skill; the word `scheduled` tells it that nobody can answer questions.
+- `--permission-mode dontAsk` denies every tool call that would need a prompt. Only your `allow` rules run.
+- `--max-turns` stops a run that goes in circles.
+- `< /dev/null` tells Claude Code not to wait for piped input.
+- Do not add `--bare`: it skips the skill, the settings and the hook.
+
+Example schedule with cron (macOS or Linux), every day at 07:30. Use the full path that `which claude` prints, because cron has a short `PATH`:
+
+```cron
+30 7 * * * cd /path/to/arrival-time-check-agent && /full/path/to/claude -p "/arrival-time-check 7 scheduled" --permission-mode dontAsk --max-turns 30 < /dev/null >> runs/cron.log 2>&1
+```
+
+This is an example. The computer must be on, and Claude Code must be logged in for the user that owns the cron job; test the command in a terminal first, then check `runs/cron.log` after the first scheduled run. Claude Code also has its own scheduling features; see [scheduled tasks](https://code.claude.com/docs/en/scheduled-tasks) and [desktop scheduled tasks](https://code.claude.com/docs/en/desktop-scheduled-tasks) in the docs. We have not tested this agent with them.
+
+A note on plans: the usage limits of a personal Pro or Max plan assume ordinary individual use and fall under Anthropic's usage policy, so for a heavy or business-critical schedule use an API key or a team plan.
+
+### 4. Move up one level at a time
+
+1. Run at the current level for 7 days.
+2. Read `runs/LOG.md`. Check that "Needs you" was right, that the "Proposed" lines are what you would have done yourself, and that there are no errors.
+3. Change one line in `AUTONOMY.md` (`Level: 2`). The first 5 actions at the new level are shadow-only: the log says "would have drafted" and nothing more happens.
+4. Before Level 3: set `Send command`, add the two allow rules, and keep the approved languages to the ones you have read drafts in.
+
+To stop everything, set `Level: PAUSED`. It takes effect at the start of the next run.
+
+### What it hands to other agents
+
+- `runs/LOG.md` — one entry per run. [`morning-routine-agent`](https://github.com/th1-ai/morning-routine-agent) can read the latest entry and the level in `AUTONOMY.md` for the daily briefing.
+- `runs/handoff/arrival-time-check-agent.md` — the current state of each reservation without an arrival time (asked, sent, manual follow-up). [`email-triage-agent`](https://github.com/th1-ai/email-triage-agent) can use it to recognise a guest's answer.
+
+The formats are in [`runs/README.md`](runs/README.md).
 
 ---
 
@@ -138,6 +231,7 @@ This agent works well alongside:
 - [`concierge-agent`](https://github.com/th1-ai/concierge-agent) — handles the dining / transfer / activity questions guests reply with
 - [`morning-routine-agent`](https://github.com/th1-ai/morning-routine-agent) — the daily briefing; a natural place to run this check once a week
 - [`email-triage-agent`](https://github.com/th1-ai/email-triage-agent) — picks up the guest's reply and adds the arrival time to the PMS reservation as a note
+- [`agent-notification-agent`](https://github.com/th1-ai/agent-notification-agent) — can tell you when a scheduled run has something under "Needs you"
 
 All 21 agents: [th1.ai/agent-stack](https://th1.ai/agent-stack)
 
