@@ -15,8 +15,8 @@ When detecting which language to write the arrival-time email in, the phone coun
 **How to apply:**
 
 1. Try phone country code first. Map +33 → French, +39 → Italian, +49 → German, etc.
-2. Fall back to the `guestCountry` / nationality field only if the phone is missing.
-3. For ambiguous prefixes (+32 Belgium, +41 Switzerland) use the country field to disambiguate French vs Dutch / French vs German / French vs Italian.
+2. Fall back to the `guest_country` / nationality field only if the phone is missing.
+3. For countries with more than one language (+32 Belgium, +41 Switzerland) neither the prefix nor the country field decides it. Use the language the guest wrote in if there is a message; otherwise use English and mark the row "check language".
 4. Default to English when neither resolves.
 5. Always show the chosen language in the summary table so the operator can override before drafting.
 
